@@ -1,0 +1,52 @@
+[project]
+name = "docs-to-markdown"
+version = "0.1.0"
+description = "Convert PDF, DOCX, and PPTX files to Markdown and JSON"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "click>=8.1.0",
+    "rich>=13.0.0",
+    "torch>=2.0.0",
+    "marker-pdf[full]>=0.2.0",
+    "python-docx>=1.0.0",
+    "python-pptx>=0.6.0",
+]
+
+[project.scripts]
+docs2md = "src.converter:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
+python_classes = "Test*"
+python_functions = "test_*"
+
+[tool.ruff]
+target-version = "py38"
+line-length = 120
+indent-width = 4
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "N", "B", "C90"]
+ignore = ["E501"]  # Line too long
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+line-ending = "auto"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0",
+    "ruff>=0.1.0",
+]

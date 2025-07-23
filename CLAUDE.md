@@ -25,6 +25,11 @@ from marker.models import create_model_dict
 from marker.output import text_from_rendered
 ```
 
+### Folder Structure Preservation
+- When converting directories with `--output-dir`, the original folder structure is preserved
+- The `base_input_path` parameter in `DocumentConverter` tracks the root directory
+- Single files are placed flat in the output directory without path preservation
+
 ## Future Improvements
 
 ### 1. Enhanced Format Support
@@ -100,17 +105,19 @@ When making improvements:
 Always run these before committing:
 ```bash
 # Format code
-ruff format src tests
+uv run ruff format src tests
 
 # Check linting
-ruff check src tests
+uv run ruff check src tests
 
 # Run tests
-pytest
+uv run pytest
 
 # Check test coverage
-pytest --cov=src --cov-report=html
+uv run pytest --cov=src --cov-report=html
 ```
+
+Note: Tests currently show Pydantic deprecation warnings from marker-pdf dependencies. These are expected and don't affect functionality.
 
 ## Debugging Tips
 

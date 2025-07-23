@@ -12,6 +12,7 @@ This Python tool recursively scans directories for PDF, DOCX, and PPTX files and
 - **Parallel Processing**: Converts multiple files concurrently for faster processing
 - **Rich CLI Interface**: Progress bars and colored output using Rich
 - **Flexible Output**: Option to specify custom output directory structure
+- **Folder Structure Preservation**: Maintains original directory hierarchy when converting folders
 
 ## Installation
 
@@ -28,12 +29,13 @@ powershell -c "irm https://astral.sh/uv/install.ps1 | iex"
 Clone the repository and install dependencies:
 
 ```bash
-git clone https://github.com/yourusername/docs_to_markdown.git
+git clone git@github.com:ab22375/docs_to_markdown.git
 cd docs_to_markdown
 
 # Install the package and dependencies
-uv sync
-uv add 'marker-pdf[full]' rich click torch
+uv sync --all-extras
+# or if you need to add marker-pdf explicitly:
+# uv add 'marker-pdf[full]'
 ```
 
 ## Usage
@@ -96,9 +98,16 @@ Each JSON file contains:
 - `type`: Document type (pdf, docx, pptx)
 - `content`: Full extracted text
 - `metadata`: Document-specific metadata
-  - PDF: Page count, detected language
+  - PDF: Image count (Note: Currently marker-pdf doesn't provide page count/language metadata)
   - DOCX: Author, title, creation/modification dates
   - PPTX: Slide count, author, title, dates
+
+### Output Directory Structure
+
+When converting directories:
+- **With `--output-dir`**: The original folder structure is preserved in the output directory
+- **Without `--output-dir`**: Files are converted in-place next to the source files
+- **Single files**: Are placed directly in the output directory without preserving paths
 
 ## Architecture
 
@@ -114,17 +123,20 @@ The converter is built with a modular architecture:
 ### Running Tests
 
 ```bash
-# Install development dependencies
-uv sync --dev
+# Install development dependencies (including test dependencies)
+uv sync --all-extras
 
 # Run all tests
-pytest
+uv run pytest
 
 # Run with coverage
-pytest --cov=src
+uv run pytest --cov=src
 
 # Run specific test file
-pytest tests/test_converter.py
+uv run pytest tests/test_converter.py
+
+# Run tests with verbose output
+uv run pytest -xvs
 ```
 
 ### Code Quality
@@ -167,7 +179,7 @@ docs_to_markdown/
 ### Common Issues
 
 1. **ModuleNotFoundError for marker**:
-   - Ensure you've installed with `uv add 'marker-pdf[full]'`
+   - Ensure you've installed with `uv sync --all-extras` or `uv add 'marker-pdf[full]'`
    - Python version must be >=3.10
 
 2. **CUDA/GPU errors**:
@@ -177,6 +189,10 @@ docs_to_markdown/
 3. **Memory issues with large PDFs**:
    - Use `--no-parallel` to process files sequentially
    - Consider processing large files individually
+
+4. **Pydantic deprecation warnings**:
+   - These warnings come from marker-pdf's dependencies using Pydantic v1 style
+   - They don't affect functionality and will be fixed when upstream libraries update
 
 ## Contributing
 

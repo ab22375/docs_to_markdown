@@ -71,24 +71,30 @@ class DocumentConverter:
             )
 
     def _get_output_paths(self, input_path: Path) -> Tuple[Path, Path]:
-        """Generate output paths for markdown and json files"""
+        """Generate output paths for markdown and json files in separate subdirectories"""
         if self.output_dir:
             # If we have a base input path (directory was passed), preserve structure
             if self.base_input_path and self.base_input_path.is_dir():
                 try:
                     # Get the relative path from the base input directory
                     relative_path = input_path.relative_to(self.base_input_path)
-                    base = self.output_dir / relative_path.parent / input_path.stem
+                    # Create separate md and json subdirectories
+                    md_base = self.output_dir / "md" / relative_path.parent / input_path.stem
+                    json_base = self.output_dir / "json" / relative_path.parent / input_path.stem
                 except ValueError:
                     # If the file is not under base_input_path, just use the filename
-                    base = self.output_dir / input_path.stem
+                    md_base = self.output_dir / "md" / input_path.stem
+                    json_base = self.output_dir / "json" / input_path.stem
             else:
                 # Single file was passed, just use the filename
-                base = self.output_dir / input_path.stem
+                md_base = self.output_dir / "md" / input_path.stem
+                json_base = self.output_dir / "json" / input_path.stem
         else:
+            # When no output dir specified, put files next to original
             base = input_path.parent / input_path.stem
+            return base.with_suffix(".md"), base.with_suffix(".json")
 
-        return base.with_suffix(".md"), base.with_suffix(".json")
+        return md_base.with_suffix(".md"), json_base.with_suffix(".json")
 
     def convert_pdf(self, pdf_path: Path) -> ConversionResult:
         """Convert PDF to markdown using marker-pdf with OCR fallback for scanned PDFs"""
@@ -112,6 +118,7 @@ class DocumentConverter:
             # Get output paths
             md_path, json_path = self._get_output_paths(pdf_path)
             md_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Save markdown
             md_path.write_text(full_text, encoding="utf-8")
@@ -168,6 +175,7 @@ class DocumentConverter:
             # Get output paths
             md_path, json_path = self._get_output_paths(docx_path)
             md_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Save markdown
             md_path.write_text(full_text, encoding="utf-8")
@@ -230,6 +238,7 @@ class DocumentConverter:
             # Get output paths
             md_path, json_path = self._get_output_paths(pptx_path)
             md_path.parent.mkdir(parents=True, exist_ok=True)
+            json_path.parent.mkdir(parents=True, exist_ok=True)
 
             # Save markdown
             md_path.write_text(full_text, encoding="utf-8")

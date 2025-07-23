@@ -11,6 +11,8 @@ dependencies = [
     "marker-pdf[full]>=0.2.0",
     "python-docx>=1.0.0",
     "python-pptx>=0.6.0",
+    "surya-ocr>=0.14.6",
+    "pymupdf>=1.26.3",
 ]
 
 [project.scripts]

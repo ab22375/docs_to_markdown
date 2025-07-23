@@ -4,15 +4,24 @@ Document to Markdown/JSON converter
 Recursively scans directories for PDF, PPTX, DOCX files and converts them to .md and .json
 """
 
+# Force CPU usage to avoid MPS issues on macOS - must be before any imports
+import os
+os.environ["PYTORCH_MPS_DISABLED"] = "1"
+os.environ["PYTORCH_DEVICE"] = "cpu"
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+
 import concurrent.futures
 import json
-import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 import click
 import torch
+
+# Disable MPS backend if available
+if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+    torch.backends.mps.enabled = False
 from docx import Document
 from marker.converters.pdf import PdfConverter
 from marker.models import create_model_dict
@@ -22,6 +31,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn
 from rich.table import Table
+
+from .ocr import OCRManager
 
 console = Console()
 
@@ -42,13 +53,15 @@ class DocumentConverter:
     """Main converter class for all document types"""
 
     def __init__(
-        self, output_dir: Optional[Path] = None, parallel: bool = True, base_input_path: Optional[Path] = None
+        self, output_dir: Optional[Path] = None, parallel: bool = True, base_input_path: Optional[Path] = None, enable_ocr: bool = False
     ):
         self.output_dir = output_dir
         self.parallel = parallel
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Force CPU to avoid MPS issues on macOS with marker-pdf
+        self.device = torch.device("cpu")
         self.pdf_converter = None
         self.base_input_path = base_input_path
+        self.ocr_manager = OCRManager(self.device, enable_ocr=enable_ocr)
 
     def _load_pdf_converter(self):
         """Lazy load PDF converter"""
@@ -78,13 +91,23 @@ class DocumentConverter:
         return base.with_suffix(".md"), base.with_suffix(".json")
 
     def convert_pdf(self, pdf_path: Path) -> ConversionResult:
-        """Convert PDF to markdown using marker-pdf"""
+        """Convert PDF to markdown using marker-pdf with OCR fallback for scanned PDFs"""
         try:
-            self._load_pdf_converter()
+            # Check if OCR is needed for this PDF
+            ocr_result = self.ocr_manager.process_if_needed(pdf_path)
 
-            # Convert PDF
-            rendered = self.pdf_converter(str(pdf_path))
-            full_text, _, images = text_from_rendered(rendered)
+            if ocr_result:
+                # OCR was used
+                full_text, ocr_metadata = ocr_result
+                metadata = {"ocr_used": True, **ocr_metadata}
+                images_count = ocr_metadata.get("page_count", 0)
+            else:
+                # Use standard marker-pdf conversion
+                self._load_pdf_converter()
+                rendered = self.pdf_converter(str(pdf_path))
+                full_text, _, images = text_from_rendered(rendered)
+                metadata = {"ocr_used": False}
+                images_count = len(images) if images else 0
 
             # Get output paths
             md_path, json_path = self._get_output_paths(pdf_path)
@@ -98,8 +121,8 @@ class DocumentConverter:
                 "source": str(pdf_path),
                 "type": "pdf",
                 "content": full_text,
-                "metadata": {},
-                "images": len(images) if images else 0,
+                "metadata": metadata,
+                "images": images_count,
             }
             json_path.write_text(json.dumps(json_data, indent=2), encoding="utf-8")
 
@@ -108,7 +131,7 @@ class DocumentConverter:
                 markdown_path=str(md_path),
                 json_path=str(json_path),
                 status="success",
-                metadata={},
+                metadata=metadata,
             )
 
         except Exception as e:
@@ -239,9 +262,14 @@ class DocumentConverter:
                 source_path=str(pptx_path), markdown_path="", json_path="", status="error", error=str(e)
             )
 
-    def find_documents(self, path: Path) -> List[Path]:
+    def find_documents(self, path: Path, skip_pdf: bool = False) -> List[Path]:
         """Recursively find all supported documents"""
         supported_extensions = {".pdf", ".docx", ".pptx"}
+        
+        if skip_pdf:
+            supported_extensions.discard(".pdf")
+            console.print("[yellow]Note: PDF files are skipped due to compatibility issues[/yellow]")
+        
         documents = []
 
         if path.is_file():
@@ -272,9 +300,9 @@ class DocumentConverter:
                 error=f"Unsupported file type: {suffix}",
             )
 
-    def convert_all(self, path: Path) -> List[ConversionResult]:
+    def convert_all(self, path: Path, skip_pdf: bool = False) -> List[ConversionResult]:
         """Convert all documents found in path"""
-        documents = self.find_documents(path)
+        documents = self.find_documents(path, skip_pdf=skip_pdf)
 
         if not documents:
             console.print("[yellow]No supported documents found!")
@@ -325,7 +353,9 @@ class DocumentConverter:
 @click.option("--output-dir", "-o", type=click.Path(path_type=Path), help="Output directory (default: same as source)")
 @click.option("--no-parallel", is_flag=True, help="Disable parallel processing")
 @click.option("--summary", "-s", is_flag=True, help="Show conversion summary table")
-def main(path: Path, output_dir: Optional[Path], no_parallel: bool, summary: bool):
+@click.option("--enable-ocr", is_flag=True, help="Enable OCR for scanned PDFs (experimental)")
+@click.option("--skip-pdf", is_flag=True, help="Skip PDF files (recommended due to compatibility issues)")
+def main(path: Path, output_dir: Optional[Path], no_parallel: bool, summary: bool, enable_ocr: bool, skip_pdf: bool):
     """
     Convert PDF, DOCX, and PPTX files to Markdown and JSON.
 
@@ -335,23 +365,33 @@ def main(path: Path, output_dir: Optional[Path], no_parallel: bool, summary: boo
         Panel.fit(f"[bold blue]Document to Markdown Converter[/bold blue]\nProcessing: {path}", border_style="blue")
     )
 
+    
     converter = DocumentConverter(
-        output_dir=output_dir, parallel=not no_parallel, base_input_path=path if path.is_dir() else None
+        output_dir=output_dir, parallel=not no_parallel, base_input_path=path if path.is_dir() else None, enable_ocr=enable_ocr
     )
 
-    results = converter.convert_all(path)
+    results = converter.convert_all(path, skip_pdf=skip_pdf)
 
     if summary and results:
         # Create summary table
         table = Table(title="Conversion Summary")
         table.add_column("File", style="cyan")
         table.add_column("Status", style="green")
+        table.add_column("Method", style="magenta")
         table.add_column("Output", style="yellow")
 
         success_count = 0
+        ocr_count = 0
         for result in results:
             status = "✓ Success" if result.status == "success" else f"✗ Error: {result.error}"
             status_style = "green" if result.status == "success" else "red"
+
+            # Determine conversion method
+            method = "Standard"
+            if result.status == "success" and result.metadata:
+                if result.metadata.get("ocr_used", False):
+                    method = f"OCR ({result.metadata.get('ocr_engine', 'unknown')})"
+                    ocr_count += 1
 
             if result.status == "success":
                 success_count += 1
@@ -359,12 +399,19 @@ def main(path: Path, output_dir: Optional[Path], no_parallel: bool, summary: boo
             else:
                 output = "N/A"
 
-            table.add_row(os.path.basename(result.source_path), f"[{status_style}]{status}[/{status_style}]", output)
+            table.add_row(
+                os.path.basename(result.source_path), f"[{status_style}]{status}[/{status_style}]", method, output
+            )
 
         console.print(table)
-        console.print(
-            f"\n[bold]Total: {len(results)} | Success: {success_count} | Failed: {len(results) - success_count}[/bold]"
-        )
+
+        # Enhanced summary with OCR info
+        failed_count = len(results) - success_count
+        summary_parts = [f"Total: {len(results)}", f"Success: {success_count}", f"Failed: {failed_count}"]
+        if ocr_count > 0:
+            summary_parts.append(f"OCR Used: {ocr_count}")
+
+        console.print(f"\n[bold]{' | '.join(summary_parts)}[/bold]")
 
 
 if __name__ == "__main__":

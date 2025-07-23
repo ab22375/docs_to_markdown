@@ -102,6 +102,74 @@ class TestDocumentConverter:
         json_content = json.loads(Path(result.json_path).read_text())
         assert json_content["type"] == "pdf"
         assert json_content["content"] == "# Test Content\nThis is test content."
+        # Should have ocr_used metadata from the new implementation
+        assert "ocr_used" in json_content["metadata"]
+
+    @patch("src.ocr.OCRManager.process_if_needed")
+    def test_convert_pdf_with_ocr(self, mock_ocr_process, converter, temp_dir):
+        """Test PDF conversion with OCR"""
+        # Mock OCR processing
+        mock_ocr_process.return_value = (
+            "# OCR Content\nThis is OCR extracted text.",
+            {
+                "ocr_used": True,
+                "ocr_engine": "surya",
+                "languages": ["en"],
+                "page_count": 2,
+            },
+        )
+
+        # Create test PDF
+        test_pdf = temp_dir / "test.pdf"
+        test_pdf.touch()
+
+        # Convert
+        result = converter.convert_pdf(test_pdf)
+
+        # Verify
+        assert result.status == "success"
+        assert result.error is None
+        assert Path(result.markdown_path).exists()
+        assert Path(result.json_path).exists()
+
+        # Check content
+        md_content = Path(result.markdown_path).read_text()
+        assert "# OCR Content" in md_content
+
+        json_content = json.loads(Path(result.json_path).read_text())
+        assert json_content["type"] == "pdf"
+        assert json_content["content"] == "# OCR Content\nThis is OCR extracted text."
+        assert json_content["metadata"]["ocr_used"] is True
+        assert json_content["metadata"]["ocr_engine"] == "surya"
+        assert json_content["images"] == 2
+
+    @patch("src.ocr.OCRManager.process_if_needed")
+    def test_convert_pdf_no_ocr_needed(self, mock_ocr_process, converter, temp_dir):
+        """Test PDF conversion when OCR is not needed"""
+        # Mock OCR not needed
+        mock_ocr_process.return_value = None
+
+        # Also need to mock marker-pdf since OCR won't be used
+        with patch("src.converter.PdfConverter") as mock_pdf_converter_class, patch(
+            "src.converter.create_model_dict"
+        ) as mock_create_model_dict, patch("src.converter.text_from_rendered") as mock_text_from_rendered:
+            mock_create_model_dict.return_value = {}
+            mock_pdf_converter = Mock()
+            mock_pdf_converter_class.return_value = mock_pdf_converter
+            mock_pdf_converter.return_value = Mock()
+            mock_text_from_rendered.return_value = ("# Regular Content", None, [])
+
+            # Create test PDF
+            test_pdf = temp_dir / "test.pdf"
+            test_pdf.touch()
+
+            # Convert
+            result = converter.convert_pdf(test_pdf)
+
+            # Verify
+            assert result.status == "success"
+            json_content = json.loads(Path(result.json_path).read_text())
+            assert json_content["metadata"]["ocr_used"] is False
 
     @patch("src.converter.PdfConverter")
     @patch("src.converter.create_model_dict")
